@@ -1,0 +1,3 @@
+id,key_path,index_type,key size,value size,num of keys,size limit (MB),P0 (load) num,P0 throughput,P1 (write) num,P1 (read) num,P1 (read through LI) num,P1 write throughput,P1 read throughput,P2 (write) num,P2 (read) num,P2 (read through LI) num,P2 write throughput,P2 read throughput,P3 (write) num,P3 (read) num,P3 (read through LI) num,P3 write throughput,P3 read throughput,
+20240726222323,output_1M_RW.txt,LearnedKV,8,1016,1000000,1269.53,1000000,115.387,499554,500446,63433,50.5086,52.9068,498911,501089,142976,41.0123,76.0177,499941,500059,131221,57.8925,70.2557,
+20240726215850,output_1M_RW.txt,LearnedKV,8,1016,1000000,1269.53,1000000,94.6945,499554,500446,63433,51.8052,48.0928,498911,501089,142976,39.3317,57.3224,499941,500059,131221,58.8773,66.9422,

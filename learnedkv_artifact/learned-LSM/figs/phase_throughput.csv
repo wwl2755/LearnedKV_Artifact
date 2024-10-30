@@ -1,0 +1,4 @@
+id,key_path,index_type,key size,value size,num of keys,size limit (MB),P0 (load) num,P0 throughput,P1 (write) num,P1 (read) num,P1 (read through LI) num,P1 write throughput,P1 read throughput,P2 (write) num,P2 (read) num,P2 (read through LI) num,P2 write throughput,P2 read throughput,P3 (write) num,P3 (read) num,P3 (read through LI) num,P3 write throughput,P3 read throughput,
+20240719220641,output_1M_RW.txt,LearnedKV,8,1016,1000000,1269.53,1000000,120.335,499554,500446,63433,56.1795,57.3406,498911,501089,142976,43.0029,78.5731,499941,500059,131221,62.5491,76.9622,
+20240719220743,output_1M_RW.txt,RocksDB+,8,1016,1000000,1269.53,1000000,121.26,499554,500446,0,49.1796,49.6179,498911,501089,0,34.5661,54.8114,499941,500059,0,49.2902,50.9928,
+20240722230600,output_1M_RW.txt,BlobDB,8,1016,1000000,1269.53,1000000,10.3118,499554,500446,0,7.10933,56.2967,498911,501089,0,5.35177,56.8918,499941,500059,0,4.57993,57.3538,

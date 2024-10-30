@@ -1,0 +1,101 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Ignore all binary files
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Ignore compiled files
+*.o
+*.out
+
+# Ignore package files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Ignore logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Ignore OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Ignore IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore node modules
+node_modules/
+
+# Ignore Python compiled files
+__pycache__/
+*.py[cod]
+
+# Add more specific rules for your project here
+
+/db/*
+/tmp/*
+test
+temp
+
+output_*
+
+motivation/rocksdb
+motivation/rocksdb_new
+
+
+out.csv
+
+competitor/benchmark
+competitor/index_file
+competitor/index_file_data
+competitor/db/*
+competitor/btree_disk

@@ -1,0 +1,4 @@
+Initial Keys,Read Time (ms),Read Throughput (ops/s),Write Time (ms),Write Throughput (ops/s)
+1000000,2039,490436,3801,263089
+5000000,5175,193237,4097,244081
+10000000,6443,155207,5492,182083

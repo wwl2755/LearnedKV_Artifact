@@ -1,0 +1,5 @@
+index_type,time for rocksdb,time for learned index,time for loading
+LearnedKV,1.15747,15.396,4.5839
+LearnedKV,19.2445,0,4.5839
+RocksDB+,21.0975,0,4.3716
+

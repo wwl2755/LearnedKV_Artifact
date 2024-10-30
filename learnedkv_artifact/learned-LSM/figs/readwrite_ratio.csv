@@ -1,0 +1,9 @@
+id,read:write ratio,index_type,P3 write throughput,P3 read throughput
+2.02308E+13,7:3,LearnedKV,46.9861,91.8553
+2.02308E+13,7:3,RocksDB,39.1291,76.9837
+2.02308E+13,5:5,LearnedKV,60.403,73.505
+2.02308E+13,5:5,RocksDB,48.5893,55.4029
+2.02308E+13,3:7,LearnedKV,39.8627,50.016
+2.02308E+13,3:7,RocksDB,32.9987,29.3283
+2.02308E+13,Write-only,LearnedKV,52.7729,0
+2.02308E+13,Write-only,RocksDB,45.7966,0

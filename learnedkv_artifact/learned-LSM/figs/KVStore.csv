@@ -1,0 +1,7 @@
+index_type,write_throughput,read_throughput
+LearnedKV,87.8761,143.013
+Bourbon,48.3289,115.005
+HashKV,63.92,90.997
+B+-Tree,7.10656,18.2314
+Hy_alex_CprD,28.6713,11.8479
+Hy_BTree_Leco,11.211,9.7182

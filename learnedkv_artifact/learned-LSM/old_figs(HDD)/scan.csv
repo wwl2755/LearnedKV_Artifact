@@ -1,0 +1,7 @@
+index_type,scan_throughput,nums_scan,nums_kv,scan_after_update
+LearnedKV,0.610593,1000,545728,0
+RocksDB,0.129208,1000,545728,0
+LearnedKV,0.39661,1000,544921,1
+RocksDB,0.109465,1000,544921,1
+LearnedKV,0.420684,1000,544620,1
+RocksDB,0.111121,1000,544620,1

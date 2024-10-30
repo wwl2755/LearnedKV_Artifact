@@ -1,0 +1,3 @@
+index_type,write_throughput,read_throughput
+LearnedKV,18.4135, 74.5005
+HashKV,5.13, 77.09

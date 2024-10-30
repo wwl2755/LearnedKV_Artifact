@@ -1,0 +1,3 @@
+index_type,read_throughput,write_throughput
+LearnedKV,21.3913,8.26459
+B+-tree,4.0246,1.10521
