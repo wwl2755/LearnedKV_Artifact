@@ -1,6 +1,7 @@
 # Artifact for LearnedKV
 
-## 1. Clone the Repository
+## 1. Clone this Repository
+All the tests are conducted on Ubuntu20.04
 
 ## 2. Build RocksDB
 ```
@@ -16,12 +17,11 @@ sudo make install -j
 mkdir datasets
 cd YCSB-C
 
-$ sudo apt-get install libtbb-dev
-$ make
+sudo apt-get install libtbb-dev
+make
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
-./ycsbc -db tbb_rand -threads 4 -P workloads/workloada.spec
 sh generate_datasets.sh
 // all datasets will be stored in datasets directory
 ```

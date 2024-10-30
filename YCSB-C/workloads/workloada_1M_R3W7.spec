@@ -12,16 +12,10 @@ workload=com.yahoo.ycsb.workloads.CoreWorkload
 
 readallfields=true
 
-readproportion=0
-updateproportion=1
+readproportion=0.3
+updateproportion=0.7
 scanproportion=0
 insertproportion=0
 
-requestdistribution=latest
-
-# Percentage of data items that constitute the hot set
-hotspotdatafraction=0.2
-
-# Percentage of operations that access the hot set
-hotspotopnfraction=0.8
+requestdistribution=zipfian
 

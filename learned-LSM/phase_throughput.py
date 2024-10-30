@@ -3,17 +3,17 @@ import numpy as np
 
 def create_throughput_plot(font_size=12):
     # Data
-    index_types = ['LearnedKV', 'RocksDB+']
+    index_types = ['LearnedKV', 'RocksDB']
     write_phases = ['P0', 'P1', 'P2', 'P3']
     read_phases = ['P1', 'P2', 'P3']  # Omitting P0 for read throughput
 
     # Read data from CSV
     import pandas as pd
-    df = pd.read_csv('phase_throughput.csv')
+    df = pd.read_csv('out.csv')
     
     # Extract throughput data for each index type
     learned_kv_data = df[df['index_type'] == 'LearnedKV'].iloc[0]
-    rocksdb_data = df[df['index_type'] == 'RocksDB+'].iloc[0]
+    rocksdb_data = df[df['index_type'] == 'RocksDB'].iloc[0]
     
     # Write throughput data
     write_throughput = [
@@ -88,7 +88,7 @@ def create_throughput_plot(font_size=12):
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig('phase_throughput.pdf', bbox_inches='tight')
+    # plt.savefig('phase_throughput.pdf', bbox_inches='tight')
     plt.savefig('phase_throughput.png', dpi=300, bbox_inches='tight')
 
     plt.show()

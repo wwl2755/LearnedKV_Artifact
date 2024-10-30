@@ -12,20 +12,23 @@
 g++ test.cpp -o test -std=c++17 -lrocksdb -lpthread -lsnappy -lz -lbz2 -llz4 -lzstd -ldl -w
 # g++ test.cpp -O2 -o test -std=c++17 -lrocksdb -lpthread -lsnappy -lz -lbz2 -llz4 -lzstd -lleveldb -w
 
+rm out.csv
+
 # various workloads
 # datasets="output_1M_R7W3.txt output_1M_RW.txt output_1M_R3W7.txt output_1M_W.txt"
-datasets="output_1M_RW.txt"
+
+D="workloada_1M_output.txt"
 # datasets="output_1M_S.txt output_1M_W_S.txt output_1M_W_S_2.txt"
 # datasets="output_1M_YCSB_a.txt output_1M_YCSB_b.txt output_1M_YCSB_c.txt"
 # over_provision_ratios="0.1 0.2 0.3 0.4 0.5"
 
-for dataset in $datasets; do
+for dataset in $D; do
     rm -r db/*
-    ./test --keys_file=${dataset} --index_type=LearnedKV --num_kv=1000000 --over_provision_ratio=0.3
+    ./test --keys_file=../datasets/${dataset} --index_type=LearnedKV --num_kv=1000000 --over_provision_ratio=0.3
 
 
     rm -r db/*
-    ./test --keys_file=${dataset} --index_type=RocksDB --num_kv=1000000 --over_provision_ratio=0.3
+    ./test --keys_file=../datasets/${dataset} --index_type=RocksDB --num_kv=1000000 --over_provision_ratio=0.3
 done
 
 
