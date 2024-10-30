@@ -2,7 +2,7 @@
 
 ## 1. Clone the Repository
 
-## 2. Clone the Repository
+## 2. Build RocksDB
 git clone https://github.com/facebook/rocksdb.git
 cd rocksdb
 git fetch --all --tags
