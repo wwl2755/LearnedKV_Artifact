@@ -40,3 +40,6 @@
 redis/sample
 ycsbc
 output.txt
+
+test
+test/*
