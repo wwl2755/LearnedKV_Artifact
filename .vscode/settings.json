@@ -68,6 +68,9 @@
         "streambuf": "cpp",
         "typeindex": "cpp",
         "typeinfo": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "complex": "cpp",
+        "strstream": "cpp",
+        "cfenv": "cpp"
     }
 }

@@ -1,8 +1,0 @@
-bin/output_*
-
-hashkv_test
-
-
-data_dir/*
-level_db/*
-

@@ -1,4 +1,3 @@
-#include "BourbonWrapper.h"
 #include <iostream>
 // #include <rocksdb/db.h>
 #include <fstream>
@@ -12,7 +11,9 @@
 #include <stdlib.h>     // srand(), rand()
 #include <functional>
 #include <sys/time.h>  // for gettimeofday()
-// #include "../../utils.h"
+
+// #include "B+_Tree_copy.h"
+#include "hybrid_index.h"
 
 using namespace std;
 
@@ -44,10 +45,11 @@ string output_path = "../../out.csv";
 
 unsigned long long group_size = 0;
 
-void gen_value(string key, std::string& value, size_t size) {
+
+
+void gen_value(unsigned long long key, std::string& value, size_t size) {
     // Convert the ULL to a character (e.g., use the lowest byte)
-    // char key_char = static_cast<char>(key & 0xFF);
-    char key_char = key[0];
+    char key_char = static_cast<char>(key & 0xFF);
 
     // Resize the string to the desired size
     value.resize(size);
@@ -59,6 +61,9 @@ bool file_exists(const std::string &str) {
     std::ifstream fs(str);
     return fs.is_open();
 }
+
+
+
 
 void read_workload(vector<pair<string,unsigned long long>>& workloads, string file_path){ // pass by reference to avoid copying
     string line;
@@ -86,12 +91,13 @@ void read_workload(vector<pair<string,unsigned long long>>& workloads, string fi
     cout<<"Total num of workloads: "<<workloads.size()<<endl;
 }
 
+
 void print_throughtput(long &write_count, long &read_count){
     cout<<"-----Throughput (KOPS)----------"<<endl;
     cout<<"Num of write operations: "<<write_count<<endl;
     cout<<"Throughput: "<<1000 * (double)(write_count)/time_map["UPDATE"]<<endl;
     cout<<"Num of read operations: "<<read_count<<endl;
-    cout<<"Throughput: "<<1000 * (double)(read_count)/time_map["READ"]<<endl;
+    cout<<"Throughput: "<<1000 * (double)read_count/time_map["READ"]<<endl;
     if (learned_index_used){
         cout<<"Read query through Learned index: "<<learned_index_count<<endl;
         cout<<"Throughput: "<<1000* (double)learned_index_count/learned_index_time<<endl;
@@ -110,7 +116,7 @@ void print_throughtput(long &write_count, long &read_count){
     // ofile << read_count << ",";
     // ofile << learned_index_count << ",";
     // ofile << 1000 * (double)(write_count)/time_map["UPDATE"] << ",";
-    // ofile << 1000 * (double)(read_count)/time_map["READ"] << ",";
+    // ofile << 1000 * (double)read_count/time_map["READ"] << ",";
     ofile << 1000 * (double)(write_count+read_count)/(time_map["UPDATE"]+time_map["READ"]) << ",";
 
     read_count = 0;
@@ -124,36 +130,21 @@ void print_throughtput(long &write_count, long &read_count){
     gc_write_size=0;
 }
 
+
+
 int main(int argc, char **argv) {
-    // BourbonWrapper bourbon;
-    // std::string db_location = "./db";
-
-    // // Initialize
-    // bourbon.initialize(db_location);
-
-    // // Put operation
-    // bourbon.put(1234, sizeof(unsigned long long), "test_value", 10);
-
-    // // Get operation
-    // std::string retrieved_value = bourbon.get(1234, sizeof(unsigned long long));
-    // std::cout << "Retrieved value: " << retrieved_value << std::endl;
-
-
-    // Shutdown is called automatically in the destructor
-
-
     if (argc < 3) {
         // path of source reflects the workload data 
         fprintf(stderr, "%s <path of source> [num of loading kv pairs]\n", argv[0]);
         exit(-1);
     }
-    auto flags = parse_flags2(argc, argv);
+    auto flags = parse_flags(argc, argv);
     
-    string keys_file_path = get_required2(flags, "keys_file"); // required
-    // string index_type = get_with_default2(flags, "index_type", "LearnedKV");
-    unsigned long long num_kv = stoull(get_required2(flags, "num_kv"));
-    double over_provision_ratio = stod(get_with_default2(flags, "over_provision_ratio", "0.3"));
-    string distribution = get_with_default2(flags, "distribution", "zipfian");
+    string keys_file_path = get_required(flags, "keys_file"); // required
+    // string index_type = get_with_default(flags, "index_type", "LearnedKV");
+    unsigned long long num_kv = stoull(get_required(flags, "num_kv"));
+    double over_provision_ratio = stod(get_with_default(flags, "over_provision_ratio", "0.3"));
+    string distribution = get_with_default(flags, "distribution", "zipfian");
 
 
     group_size = num_kv*(KEY_SIZE+VALUE_SIZE)*(1+over_provision_ratio);
@@ -168,12 +159,11 @@ int main(int argc, char **argv) {
 
     
 
-    // LearnedKV *learnedkv = new LearnedKV;
-    BourbonWrapper bourbon;
-    // std::string db_location = "./db";
-
-    // Initialize
-    // bourbon.initialize(DB_PATH);
+    //Group* groups = new Group[numOfGroup];
+    LearnedKV *learnedkv = new LearnedKV;
+    //RDB *learnedkv = new RDB;
+    //BlobDB *learnedkv = new BlobDB;
+    //HashKV *learnedkv = new HashKV;
 
 
     
@@ -230,7 +220,7 @@ int main(int argc, char **argv) {
     // else{
     //     ofile << "RocksDB" << ",";
     // }
-    ofile << "Bourbon" << ",";
+    ofile << "Hybrid_PGM_Disk" <<",";
     // ofile << KEY_SIZE << ",";
     // ofile << VALUE_SIZE << ",";
     // ofile << KVNUM << ",";
@@ -241,36 +231,13 @@ int main(int argc, char **argv) {
 
 
     //builk load
-    // learnedkv->bulk_load(workloads,KVNUM);
-    // cout<<"Bulk load finished"<<endl;
+    learnedkv->bulk_load(workloads,KVNUM);
+    cout<<"Bulk load finished"<<endl;
 
 
-    for (size_t i = 0;i<workloads.size();i++){
-        // unsigned long long key = workloads[i].second;
-        string key = to_string(workloads[i].second);
-        key.resize(KEY_SIZE);
-        if(i==(size_t)KVNUM){
-            cout<<"Finished loading initial keys"<<endl;
-            
-            // comment this part if not needed
-            // dump all valid keys to learned index
-            // learnedkv->garbage_collection(KEY_SIZE,VALUE_SIZE);
-            // bourbon.garbage_collection(KEY_SIZE,VALUE_SIZE);
-
-            cout<<"-----Throughput (KOPS)----------"<<endl;
-            cout<<"Num of load operations: "<<KVNUM<<endl;
-            cout<<"Throughput: "<<1000 * (double)KVNUM/time_map["INSERT"]<<endl;
-
-            // ofile.open(output_path, std::ios::app);
-            // ofile << KVNUM << ",";
-            // ofile << 1000 * (double)KVNUM/time_map["INSERT"] << ",";
-            // ofile.close();
-
-            read_count = 0;
-            write_count = 0;
-            time_map.clear();
-        }
-        else if(i%KVNUM == 0 && i!=0){
+    for (size_t i = KVNUM;i<workloads.size();i++){
+        unsigned long long key = workloads[i].second;
+        if(i%KVNUM == 0 && i!=KVNUM){
             print_throughtput(write_count, read_count);
 
         }
@@ -289,15 +256,16 @@ int main(int argc, char **argv) {
             string value;
             
             gen_value(key,value,VALUE_SIZE);
-
+            // if(key==14643238588227784960ULL){
+            //     cout<<"key: "<<key<<endl;
+            //     cout<<"value to be put: "<<value<<endl;
+            // }
             
             struct timeval startTime, endTime;
             gettimeofday(&startTime, 0);
-            // learnedkv->put(key, KEY_SIZE, value, VALUE_SIZE);
-
-            // Put operation
-            bourbon.put(key, KEY_SIZE, value, VALUE_SIZE);
-
+            learnedkv->put(key, KEY_SIZE, value, VALUE_SIZE);
+            //groups[groupId].put(key_char, KEY_SIZE, value, VALUE_SIZE);
+            //groups[groupId].get(key_char, KEY_SIZE, value, VALUE_SIZE);
             gettimeofday(&endTime, 0);
             time_map[op] += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
             write_count++;
@@ -311,17 +279,27 @@ int main(int argc, char **argv) {
             //groups[groupId].put(key_char, KEY_SIZE, value, VALUE_SIZE);
             struct timeval startTime, endTime;
             gettimeofday(&startTime, 0);
-            // int res = learnedkv->get(key, KEY_SIZE, value, VALUE_SIZE);
+            int res = learnedkv->get(key, KEY_SIZE, value, VALUE_SIZE);
             //groups[groupId].get(key_char, KEY_SIZE, value, VALUE_SIZE);
-
-            // Get operation
-            value = bourbon.get(key, KEY_SIZE);
-            // std::cout << "Retrieved value: " << retrieved_value << std::endl;
-
             gettimeofday(&endTime, 0);
             time_map[op] += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
             read_count++;
 
+            // if(key==14643238588227784960ULL){
+            //     cout<<"key: "<<key<<endl;
+            //     cout<<"value out of get(): "<<value<<endl;
+            // }
+            
+            // string correct_value;
+            
+            // gen_value(key,correct_value,VALUE_SIZE);
+            // if(value.compare(correct_value)!=0){
+            //     cout<<"Read value is not correct"<<endl;
+            //     cout<<"key: "<<key<<endl;
+            //     cout<<"value: "<<value<<endl;
+            //     cout<<"correct value: "<<correct_value<<endl;
+            //     break;
+            // }
         }
 
 
@@ -332,7 +310,7 @@ int main(int argc, char **argv) {
     print_throughtput(write_count, read_count);
     // print_time_breakdown(write_count, read_count);
 
-    // delete learnedkv;
+    delete learnedkv;
 
     return 0;
 }
