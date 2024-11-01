@@ -36,6 +36,7 @@ The result can be seen in readwrite_ratio.png
 
 3. Multiple KV Stores Throughput Comparison for YCSB Workloads.
 Before running experiments, competitors need to be set up
+```
 LearnedKV
     sh kv_store.sh
 Hashkv
@@ -49,7 +50,7 @@ Bourbon
     make -j
     mkdir db
     sh ../run.sh
-hybrid index (still working)
+hybrid index
     cd competitor/Efficient-LI-On-Disk
     mkdir build
     cd build
@@ -61,5 +62,12 @@ B+-Tree
     cd competitor/B+-Tree
     mkdir db
     sh run.sh
+```
 
+After running all KV stores, the results are stored in out.csv under competitor directory
+To visualize the results: 
+```
+cd competitor
+python3 competitors.py
+```
 

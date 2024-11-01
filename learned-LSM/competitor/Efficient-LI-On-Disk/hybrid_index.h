@@ -291,7 +291,7 @@ void bulk_load (vector<pair<string, unsigned long long>> &workloads , unsigned i
       // bytes_read = fread(&value[0], sizeof(char), VALUE_SIZE, vlog);
       DirectIOHelper::readAligned(vlog, &value[0], VALUE_SIZE);
       //cout<<"bytes read for value: "<<bytes_read<<endl;
-      assert(bytes_read==VALUE_SIZE);
+      // assert(bytes_read==VALUE_SIZE);
 
       //string key_str = key;
       unsigned long long key_ull = 0;
