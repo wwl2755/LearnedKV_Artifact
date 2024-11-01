@@ -23,15 +23,14 @@ make
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 sh generate_datasets.sh
-// all datasets will be stored in datasets directory
 ```
+all datasets will be stored in datasets directory
 
 ## 4. LearnedKV with RocksDB
 ```
-mkdir db
 cd learned-LSM
-sh run.sh
 ```
+Then check README.md in the directory
 
 ## 5. Other KV stores (HashKV, Bourbon, Learned Index, B+-Tree)
 
