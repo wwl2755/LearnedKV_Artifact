@@ -27,9 +27,11 @@ sh generate_datasets.sh
 ```
 
 ## 4. LearnedKV with RocksDB
+```
 mkdir db
 cd learned-LSM
 sh run.sh
+```
 
 ## 5. Other KV stores (HashKV, Bourbon, Learned Index, B+-Tree)
 

@@ -99,3 +99,5 @@ competitor/index_file
 competitor/index_file_data
 competitor/db/*
 competitor/btree_disk
+
+*.png

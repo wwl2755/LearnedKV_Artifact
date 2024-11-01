@@ -11,6 +11,11 @@
 #include <arpa/inet.h>
 #include "rocksdb/statistics.h"
 // #include "direct_io.h"
+#include <thread>
+#include <atomic>
+#include <mutex>
+
+// only tested for YCSB workloads
 
 using namespace std;
 
@@ -19,12 +24,18 @@ using namespace std;
 #define VALUE_SIZE 1016 // KV size is 1024 bytes
 
 
+// NOTE: using GROUP_SIZE to represent the condition of GC
+//#define GROUP_SIZE (unsigned long long)(1.3*10*1000*1000) * 1024ULL // 1.3 * 100K * 1KB = 1300MB
+
 #define ERR_BOUND 1000
 
 #define KEY_TYPE uint64_t
 #define offset_t uint64_t
 
 #define VLOG_PATH "db/vlog"
+#define LI_VLOG_PATH "db/li_vlog"
+#define NEW_VLOG_PATH "db/new_vlog"
+#define NEW_LI_VLOG_PATH "db/new_li_vlog"
 
 //size_t group_count = 0;
 extern long learned_index_time;
@@ -69,26 +80,46 @@ class LearnedKV {
   // PLR models m;
   // vector<Segment> model;
   string model_str; // the path of the model file
+  string new_model_str; // temporary model file during GC
 
   // record insert position of vlog // presented by the num of kv that have been already inserted
-  unsigned long long write_pos;
+  unsigned long long total_num; // sum of both vlog
 
   //KeyPtr* key_arry; //Can be optimized later
   //vector<unsigned long long> key_array;
   string key_array_str; // the path of the key_array file
+  string new_key_array_str; // the path of the key_array file
 
   BloomFilter filter{100000000, 7}; // 100,000,000 bits, 7 hash functions
 
+  rocksdb::DB* new_db; // Secondary RocksDB instance during GC
+  std::atomic<bool> gc_in_progress;
+  std::atomic<bool> gc_done;
+  std::mutex db_mutex;
+  std::thread gc_thread;
+
+  // only available during GC
+  vector<Segment> current_model;
+  std::mutex model_mutex;
+
   LearnedKV(){
     initialize_rocksdb();
-    write_pos=0;
+    // write_pos=0;
+    total_num = 0;
     model_str = "./db/model";
+    new_model_str = "./db/new_model";
     key_array_str = "./db/key_array";
+    new_key_array_str = "./db/new_key_array";
+    gc_in_progress = false;
+    gc_done = false;
   }
 
   ~LearnedKV(){
     // Close the database
     delete db;
+    if(new_db){
+      delete new_db;
+    }
     // TODO: clean up the model and key_arry files
   }
 
@@ -103,6 +134,7 @@ class LearnedKV {
     options.use_direct_io_for_flush_and_compaction = true;
 
     options.write_buffer_size = 64 *  1024; // memtable size = 64KB
+    // options.write_buffer_size = 2 * 1024 *  1024; // memtable size = 64KB
 
     // disable write cache
     rocksdb::BlockBasedTableOptions table_options;
@@ -187,21 +219,27 @@ class LearnedKV {
     }
 
     // write model to file in 
-    FILE * model_file = fopen(model_str.c_str(),"wb");
+    FILE * model_file = fopen(new_model_str.c_str(),"wb");
     if(model_file==NULL){
       cout<<"model file does not exist."<<endl;
       return -1;
     }
     fwrite(model.data(),model.size()*sizeof(Segment),1,model_file);
+    // for(size_t i = 0;i<model.size();i++){
+    //   fwrite(&model[i],sizeof(Segment),1,model_file);
+    // }
     fclose(model_file);
 
     // write key array to file
-    FILE * key_array_file = fopen(key_array_str.c_str(),"wb");
+    FILE * key_array_file = fopen(new_key_array_str.c_str(),"wb");
     if(key_array_file==NULL){
       cout<<"key array file does not exist."<<endl;
       return -1;
     }
     fwrite(x.data(),x.size()*sizeof(unsigned long long),1,key_array_file);
+    // for(size_t i = 0;i<x.size();i++){
+    //   fwrite(&x[i],sizeof(unsigned long long),1,key_array_file);
+    // }
 
     // FILE* key_array_file = DirectIOHelper::openFile(key_array_str.c_str(), "wb", true);
     // DirectIOHelper::writeAligned(key_array_file, x.data(), x.size() * sizeof(unsigned long long));
@@ -274,6 +312,8 @@ class LearnedKV {
     while (lsm_it != kvs_lsm.end() && learned_it != kvs_learned.end()) {
         unsigned long long lsm_key = stringToULL(lsm_it->first);
         unsigned long long learned_key = stringToULL(learned_it->first);
+        // cout<<"lsm key: "<<lsm_key<<endl;
+        // cout<<"learned key: "<<learned_key<<endl;
 
         if (lsm_key < learned_key) {
             kvs.push_back(*lsm_it);
@@ -298,121 +338,109 @@ class LearnedKV {
   }
 
   int put(unsigned long long key, uint64_t keySize, string value, uint64_t valueSize){
+    if(gc_done){
+      detroy_old_instance();
+      gc_done = false;
+    }
     // check if it can be correctly inserted
+    if((total_num+1)*(keySize+valueSize) > group_size && !gc_in_progress){
+      // garbage_collection(keySize, valueSize);
+      // gc_count++;
 
-    if((write_pos+1)*(keySize+valueSize) > group_size){
-      garbage_collection(keySize, valueSize);
+      gc_in_progress = true;
+      initialize_new_rocksdb();
+      // write_pos = 0;
+      // create_new_vlog();
+      
+      // Start background GC thread
+      gc_thread = std::thread(&LearnedKV::garbage_collection, this, keySize, valueSize);
       gc_count++;
     }
-    assert((write_pos+1)*(keySize+valueSize) <= group_size);
     
     
     //insert K,V in vlog (file)
     //and insert K,P in LSM (buffer, then SST files)
-
-    string vlog_path = VLOG_PATH;
+    string vlog_path;
+    if(gc_in_progress){
+      vlog_path = NEW_VLOG_PATH;
+    }
+    else{
+      vlog_path = VLOG_PATH;
+    }
     FILE * vlog = fopen (vlog_path.c_str(),"a+b");
-    // FILE* vlog = DirectIOHelper::openFile(vlog_path.c_str(), "ab");
+    fseek(vlog, 0, SEEK_END);
+
+    size_t file_size = ftell(vlog);
+    unsigned long long write_pos = file_size / (keySize + valueSize);
+
     fwrite(&key,keySize,1,vlog);
     fwrite(value.data(),valueSize,1,vlog);
     // DirectIOHelper::writeAligned(vlog, &key, keySize);
     // DirectIOHelper::writeAligned(vlog, value.data(), valueSize);
     fclose(vlog);
     
-
-    assert(write_pos<100000000ULL);// write_pos should be smaller than 10^8
+    // assert(write_pos<100000000ULL);// write_pos should be smaller than 10^8
     string ptr = ullToString(write_pos);
 
     string key_str = ullToString(key);
-    rocksdb::Status status = db->Put(rocksdb::WriteOptions(), key_str, ptr);
+    rocksdb::Status status;
+    if(gc_in_progress) {
+        status = new_db->Put(rocksdb::WriteOptions(), key_str, ptr);
+    } else {
+        status = db->Put(rocksdb::WriteOptions(), key_str, ptr);
+    }
+    // rocksdb::Status status = db->Put(rocksdb::WriteOptions(), key_str, ptr);
     if (!status.ok()) {
         std::cerr << "Failed to write data to database: " << status.ToString() << std::endl;
         return -1;
     }
     
     //write_pos += keySize + valueSize;
-    write_pos ++;
-
-    // unsigned long long key_ull = 0;
-    // memcpy(&key_ull,key,sizeof(unsigned long long));
-    filter.insert(key);
-
+    total_num ++;
 
     return 0;
   }
 
 
   int get(unsigned long long key, uint64_t keySize, string& value, uint64_t valueSize){
+    if(gc_done){
+      detroy_old_instance();
+      gc_done = false;
+    }
     bool accurate = true;
     string result;
     bool rocksdb_found = false;
 
-    // struct timeval startTime, endTime;
-    // gettimeofday(&startTime, 0);
-
-    // unsigned long long key_ull = 0;
-    // memcpy(&key_ull,key,sizeof(unsigned long long));
-    if (filter.possiblyContains(key)){
-      // struct timeval startTime_rocksdb, endTime_rocksdb;
-      // gettimeofday(&startTime_rocksdb, 0);
-
-      // static int count = 0;  // Counts the number of times the function is called
-      // static std::chrono::nanoseconds totalDuration(0);  // Accumulates total duration
-      // auto start = std::chrono::high_resolution_clock::now();  // Start timer 
-
+    if (true){
       string key_str = ullToString(key);
-      rocksdb::Status status = db->Get(rocksdb::ReadOptions(), key_str, &result);
+      rocksdb::Status status;
+      if(gc_in_progress && new_db != nullptr){
+        status = new_db->Get(rocksdb::ReadOptions(), key_str, &result);
+      }
 
-      // auto end = std::chrono::high_resolution_clock::now();  // End timer
-      // std::chrono::nanoseconds duration = end - start;
-      // totalDuration += duration;  // Accumulate total time
-      // ++count;  // Increment call count
-      // // Optionally, print average time every N calls
-      // if (count % 1000 == 0) {
-      //     double averageTime = static_cast<double>(totalDuration.count()) / count;
-      //     std::cout << "Average time per call after " << count << " calls: " 
-      //               << averageTime << " nanoseconds" << std::endl;
-      // }
-
-
-      // gettimeofday(&endTime_rocksdb, 0);
-      // rocksdb_time += (endTime_rocksdb.tv_sec - startTime_rocksdb.tv_sec) * 1000000 + (endTime_rocksdb.tv_usec - startTime_rocksdb.tv_usec);
+      if (!status.ok()) {
+          status = db->Get(rocksdb::ReadOptions(), key_str, &result);
+      }
       rocksdb_count++;
       if (status.ok()){
         rocksdb_found = true;
       }
     }
-
-    // // only used to time beakdown test
-    // gettimeofday(&endTime, 0);
-    // // rocksdb_time += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
-    // if(!rocksdb_found){
-    //   rocksdb_fail_time += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
-    // }
-    // else{
-    //   rocksdb_success_time += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
-    // }
     
     if (!rocksdb_found) {
+      //std::cerr << "Failed to read data from database: " << status.ToString() << std::endl;
       
       if(learned_index_used){
-        // struct timeval startTime_learned_index, endTime_learned_index;
-        // gettimeofday(&startTime_learned_index, 0);
 
 
         //look up in linear models
         
         accurate = false;
-        // unsigned long long key_ull = 0;
-        // memcpy(&key_ull,key,sizeof(unsigned long long));
         long long int pos = query_model(key, model_str);
         size_t kv_size = KEY_SIZE + VALUE_SIZE;
         long long int start_pos = max((pos - ERR_BOUND),0LL)*(kv_size);
         //start_pos = ceil((double)start_pos/kv_size) * kv_size; // round to multiple of kv_size
         long long int end_pos = (pos + ERR_BOUND)*(kv_size);
-        //end_pos = end_pos/kv_size * kv_size; // round to multiple of kv_size
-        
-        //fseek(vlog,start_pos,SEEK_SET);
 
         // load key array chunk from key_array_path
         FILE * key_array_file = fopen(key_array_str.c_str(),"rb");
@@ -437,15 +465,16 @@ class LearnedKV {
         start_pos = start_pos + idx * kv_size;
 
         delete[] key_array;
+        
 
-        // gettimeofday(&endTime_learned_index, 0);
-        // learned_index_time += (endTime_learned_index.tv_sec - startTime_learned_index.tv_sec) * 1000000 + (endTime_learned_index.tv_usec - startTime_learned_index.tv_usec);
+
         learned_index_count++;
 
         // struct timeval load_startTime, load_endTime;
         // gettimeofday(&load_startTime, 0);
+        string vlog_path;
 
-        string vlog_path = VLOG_PATH;
+        vlog_path = LI_VLOG_PATH;
         FILE * vlog = fopen (vlog_path.c_str(),"r+b");
         // FILE* vlog = DirectIOHelper::openFile(vlog_path.c_str(), "rb");
         if(vlog==NULL){cout<<"Cannot open the file"<<endl;}
@@ -456,14 +485,12 @@ class LearnedKV {
         fread(read_key, keySize, 1, vlog);
         unsigned long long read_key_ull = 0;
         memcpy(&read_key_ull,read_key,sizeof(unsigned long long));
+        // if(key==14643238588227784960ULL){
+        //   cout<<"read key: "<<read_key_ull<<endl;
+        // }
         
         value.resize(valueSize);
         fread(&value[0], valueSize, 1, vlog);
-
-        // char read_key[KEY_SIZE];
-        // DirectIOHelper::readAligned(vlog, read_key, keySize);
-        // value.resize(valueSize);
-        // DirectIOHelper::readAligned(vlog, &value[0], valueSize);
         fclose(vlog);
 
         // gettimeofday(&load_endTime, 0);
@@ -477,6 +504,9 @@ class LearnedKV {
       }
       else{
         // std::cerr << "Failed to read data from database: " << std::endl;
+        // unsigned long long key_ull = 0;
+        // memcpy(&key_ull,key,sizeof(unsigned long long));
+        // cout<<"Missed key: "<<key<<endl;
         return -1;
       }
 
@@ -488,10 +518,17 @@ class LearnedKV {
     unsigned long long pos = 0;
 
 
+
     pos = stringToULL(result);
 
 
-    string vlog_path = VLOG_PATH;
+    string vlog_path;
+    if(gc_in_progress){
+      vlog_path = NEW_VLOG_PATH;
+    }
+    else{
+      vlog_path = VLOG_PATH;
+    }
     FILE * vlog = fopen (vlog_path.c_str(),"rb");
     // FILE* vlog = DirectIOHelper::openFile(vlog_path.c_str(), "rb");
     if(vlog==NULL){cout<<"Cannot open the file"<<endl;}
@@ -519,75 +556,65 @@ class LearnedKV {
   int garbage_collection(uint64_t keySize, uint64_t valueSize){
     
 
-    // // Retrieve and display column family metadata
-    // rocksdb::ColumnFamilyMetaData cf_meta;
-    // db->GetColumnFamilyMetaData(&cf_meta);
-
-    // std::cout << "Column Family Name: " << cf_meta.name << std::endl;
-    // std::cout << "Size (bytes): " << cf_meta.size << std::endl;
-    // std::cout << "Number of files: " << cf_meta.file_count << std::endl;
-    // std::cout << "Number of levels: " << cf_meta.levels.size() << std::endl;
-
-    // for (const auto& level : cf_meta.levels) {
-    //     std::cout << " Level " << level.level << ":\n";
-    //     std::cout << "  Number of files: " << level.files.size() << std::endl;
-    //     for (const auto& file : level.files) {
-    //         std::cout << "  File number: " << file.file_number << ", Size: " << file.size << " bytes" << std::endl;
-    //     }
-    // }
-
-
-    // collect valid data and re-build LSM
+    // TODO: collect valid data and re-build LSM
     unordered_map<unsigned long long, string> valid_map;
-    string vlog_path = VLOG_PATH;
+    string vlog_path = LI_VLOG_PATH;
     FILE * vlog = fopen (vlog_path.c_str(),"rb");
-    // FILE* vlog = DirectIOHelper::openFile(vlog_path.c_str(), "rb");
-    if(vlog==NULL){cout<<"Cannot open the file"<<endl;}
+    if(vlog!=NULL){
+      fseek(vlog,0,SEEK_SET);
+      char key[KEY_SIZE+1];
+      string value;
+      memset(key, 0, sizeof(key));
+      while (fread(key, sizeof(char), KEY_SIZE, vlog)>0) { // loop until end of file
+        size_t bytes_read=0;
+        value.resize(VALUE_SIZE);
+        bytes_read = fread(&value[0], sizeof(char), VALUE_SIZE, vlog);
+        assert(bytes_read==VALUE_SIZE);
+        unsigned long long key_ull = 0;
+        memcpy(&key_ull,key,sizeof(unsigned long long));
+        string value_str = value;
+        valid_map[key_ull] = value;
+      }
+      fclose(vlog);
+    }
 
+    vlog_path = VLOG_PATH;
+    vlog = fopen (vlog_path.c_str(),"rb");
+    if(vlog==NULL){cout<<"Cannot open the file"<<endl;}
     fseek(vlog,0,SEEK_SET);
     char key[KEY_SIZE+1];
-    // char value[VALUE_SIZE+1];
     string value;
     memset(key, 0, sizeof(key));
-    // memset(value, 0, sizeof(value));
     while (fread(key, sizeof(char), KEY_SIZE, vlog)>0) { // loop until end of file
-    // while (DirectIOHelper::readAligned(vlog, key, KEY_SIZE)) {
       size_t bytes_read=0;
       value.resize(VALUE_SIZE);
       bytes_read = fread(&value[0], sizeof(char), VALUE_SIZE, vlog);
-      //cout<<"bytes read for value: "<<bytes_read<<endl;
       assert(bytes_read==VALUE_SIZE);
-
-      // value.resize(VALUE_SIZE);
-      // DirectIOHelper::readAligned(vlog, &value[0], VALUE_SIZE);
-
-      //string key_str = key;
       unsigned long long key_ull = 0;
       memcpy(&key_ull,key,sizeof(unsigned long long));
       string value_str = value;
-      //if(valid_map.find(key_str)!=valid_map.end()){cout<<"dup!"<<key_str<<" "<<key_str.length()<<endl;}
       valid_map[key_ull] = value;
     }
     fclose(vlog);
 
 
-
     // erase rocksdb
-    destroy_rocksdb();
+    // destroy_rocksdb();
     //std::cout << "Database erased successfully." << std::endl;
 
-    int res = std::remove(vlog_path.c_str());
+    // int res = std::remove(vlog_path.c_str());
 
     // Set up LSM options
-    initialize_rocksdb();
+    // initialize_rocksdb();
     //std::cout << "Database set up successfully." << std::endl;
     
 
     // rewrite the vlog file
+    vlog_path = NEW_LI_VLOG_PATH;
     vlog = fopen (vlog_path.c_str(),"a+b");
     // vlog = DirectIOHelper::openFile(vlog_path.c_str(), "wb");
     fseek(vlog,0,SEEK_SET);
-    write_pos = 0;
+    unsigned long long write_pos = 0;
     
     vector<pair<unsigned long long, string>> valid_vec(valid_map.begin(), valid_map.end()); // key -> value
 
@@ -597,11 +624,10 @@ class LearnedKV {
     vector<unsigned long long> x; x.clear();
     vector<double> y; y.clear();
 
-    rocksdb::WriteBatch batch;
     string ptr;
     
     for (auto it = valid_vec.begin(); it != valid_vec.end() - 1; ++it){
-      
+      //how to get the next key in the valid_vec?
       auto valid_kv = *it;
 
 
@@ -617,56 +643,22 @@ class LearnedKV {
       int num = fwrite(&key_ull,keySize,1,vlog);
       // if(num!=1){cout<<"Failed to write key to vlog."<<endl;}
       num = fwrite(valid_kv.second.data(),valueSize,1,vlog);
-      // if(num!=1){cout<<"Failed to write value to vlog."<<endl;}
-      
-
-      // DirectIOHelper::writeAligned(vlog, &key_ull, keySize);
-      // DirectIOHelper::writeAligned(vlog, valid_kv.second.data(), valueSize);
 
 
       if(learned_index_used){
         x.push_back(key_ull);
+        //cout<<"ull: "<<ull<<endl;
         y.push_back((double)write_pos);
       }
 
-      // write to rocksdb
-      if(!learned_index_used){
-        ptr = ullToString(write_pos);
-        
-        string key_str = ullToString(key_ull);
-        // enable batch write
-        batch.Put(key_str, ptr);
-
-        filter.insert(key_ull);
-
-      }
+      
       //write_pos += keySize + valueSize;
-      write_pos++;
+      total_num++;
     }
     //key_array=x;
 
-    if(!learned_index_used){
-      rocksdb::Status status = db->Write(rocksdb::WriteOptions(), &batch);
-      if (!status.ok()) {
-          std::cerr << "Failed to write data to database: " << status.ToString() << std::endl;
-          return -1;
-      }
 
-      // flush the database, otherwise all the batch is in memory
-      rocksdb::FlushOptions flush_options;
-      flush_options.wait = true;  // Wait for the flush to complete
-
-      status = db->Flush(flush_options);
-      if (!status.ok()) {
-          std::cerr << "Failed to flush the database: " << status.ToString() << std::endl;
-      }
-
-      // // only for collecting statistics
-      // bytes_written += 16*valid_vec.size();
-
-    }
-
-    // build learned index
+    // TODO: build learned index
     if(learned_index_used){
       build_piecewise_linear_regression(x, y, ERR_BOUND);
 
@@ -678,6 +670,7 @@ class LearnedKV {
 
 
     fclose(vlog);
+    gc_done = true;
     return 0;
   }
 
@@ -691,6 +684,20 @@ class LearnedKV {
 
     vector<pair<string,string>> kvs_lsm;
 
+    // unsigned long long key_ull = 0;
+    // memcpy(&key_ull,startKey,sizeof(unsigned long long));
+    // cout<<"start key: "<<startKey<<endl;
+
+    
+    // unsigned long long pos = 0;
+    // // char result_char[sizeof(unsigned long long)+1];
+    // // memset(result_char,0,sizeof(result_char));
+    // memcpy(&pos, result.data(), sizeof(unsigned long long));
+    // // strncpy(result_char,result.c_str(),sizeof(unsigned long long));
+    // // pos = stoull(result_char);
+    // pos = pos*(keySize+valueSize);
+
+    // cout<<"pos: "<<pos<<endl;
 
     // unsigned long long end_key_ull = key_ull + scanRange;
     unsigned long long end_key_ull;
@@ -713,6 +720,12 @@ class LearnedKV {
     end_key_str = ullToString(end_key_ull);
     // memcpy(&end_key_str[0], &end_key_ull, sizeof(unsigned long long));
 
+    // char end_key[KEY_SIZE+1];
+    // memset(end_key,0,sizeof(end_key));
+    // memcpy(end_key,&end_key_ull,sizeof(unsigned long long));
+    // std::string endKeyStr(end_key);
+
+    // cout<<"end key: "<<end_key_ull<<endl;
 
 
     // part 1a: scan the range from LSM
@@ -746,7 +759,12 @@ class LearnedKV {
       unsigned long long pos = 0;
       pos = stringToULL(result);
       memcpy(&pos, result.data(), sizeof(unsigned long long));
+      // cout<<"pos: "<<pos<<endl;
 
+      // char result_char[sizeof(unsigned long long)+1];
+      // memset(result_char,0,sizeof(result_char));
+      // strncpy(result_char,valueStr.c_str(),sizeof(unsigned long long));
+      // pos = stoull(result_char);
 
       string vlog_path = VLOG_PATH;
       FILE * vlog = fopen (vlog_path.c_str(),"a+b");
@@ -761,6 +779,13 @@ class LearnedKV {
       // values.push_back(value);
       kvs_lsm.push_back(make_pair(key, value));
       
+      // cout<<"key: "<<key<<endl;
+      // unsigned long long ull = stringToULL(key);
+      // cout<<"key ull: "<<ull<<endl;
+      // memcpy(&ull,key.c_str(),sizeof(unsigned long long));
+      // cout<<"key ull: "<<ull<<endl;
+      // cout<<"value: "<<value<<endl;
+      // cout<<"value size: "<<value.size()<<endl;
 
     }
 
@@ -772,6 +797,10 @@ class LearnedKV {
 
     delete it;
 
+    // if (kvs_lsm.size() == 0) {
+    //     cout<<"start key: "<<key_ull<<endl;
+    //     cout<<"end key: "<<end_key_ull<<endl;
+    // }
 
     
     // part 1b: scan the range from Learned Index
@@ -862,6 +891,10 @@ class LearnedKV {
 
       fseek(vlog, start_key_pos, SEEK_SET);
 
+      // cout<<"start pos: "<<start_key_pos<<endl;
+      // cout<<"end pos: "<<end_key_pos<<endl;
+      // cout<<"current pos: "<<ftell(vlog)<<endl;
+
       while (ftell(vlog) < end_key_pos) {
         // Read key
         unsigned long long key_ull = 0;
@@ -875,12 +908,31 @@ class LearnedKV {
         // Add to vectors
         string key_str = ullToString(key_ull);
         kvs_learned.push_back(make_pair(key_str, string(read_value)));
+        // auto key_ull = stringToULL(string(read_key));
+        // cout<<"key: "<<key_ull<<endl;
+
+        // keys.push_back(string(read_key));
+        // values.push_back(string(read_value));
+
+        // cout<<"key: "<<string(read_key)<<endl;
+        // unsigned long long ull = 0;
+        // memcpy(&ull,read_key,sizeof(unsigned long long));
+        // cout<<"key ull: "<<ull<<endl;
+        // cout<<"value: "<<string(read_value)<<endl;
 
         // Clear the buffers for the next read
         memset(read_key, 0, sizeof(read_key));
         memset(read_value, 0, sizeof(read_value));
         
       }
+      // cout<<"kv learned: "<<kvs_learned.size()<<endl;
+      // if(kvs_learned.size()==1){
+      //   cout<<"start pos: "<<start_key_pos<<endl;
+      //   cout<<"end pos: "<<end_key_pos<<endl;
+      //   cout<<"start key: "<<key_ull<<endl;
+      //   cout<<"end key: "<<end_key_ull<<endl;
+      //   std::cout << "Maximum unsigned long long: " << ULLONG_MAX << std::endl;
+      // }
     }
 
     // part 2: merge the results
@@ -904,6 +956,105 @@ class LearnedKV {
     // cout<<"kvs size: "<<kvs.size()<<endl;
 
     return 0;
+  }
+
+  int initialize_new_rocksdb() {
+    rocksdb::Options options;
+    options.create_if_missing = true;
+    options.use_direct_reads = true;
+    options.use_direct_io_for_flush_and_compaction = true;
+    options.write_buffer_size = 64 * 1024;
+    
+    rocksdb::BlockBasedTableOptions table_options;
+    table_options.block_cache = nullptr;
+    options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+    
+    options.max_bytes_for_level_base = 16 * 1024;
+    options.max_bytes_for_level_multiplier = 10;
+    options.compression = rocksdb::kNoCompression;
+    options.level_compaction_dynamic_level_bytes = false;
+
+    rocksdb::Status status = rocksdb::DB::Open(options, "./db/db_new", &new_db);
+    if (!status.ok()) {
+      std::cerr << "Failed to open new database: " << status.ToString() << std::endl;
+      return -1;
+    }
+    return 0;
+  }
+
+  // string create_new_vlog() {
+  //   string new_vlog_path = string(NEW_VLOG_PATH);
+  //   FILE* new_vlog = fopen(new_vlog_path.c_str(), "wb");
+  //   if (new_vlog == NULL) {
+  //       cerr << "Failed to create new vlog file" << endl;
+  //       return "";
+  //   }
+  //   fclose(new_vlog);
+  //   return new_vlog_path;
+  // }
+
+  void detroy_old_instance(){
+    // destroy_rocksdb();
+    string vlog_path = VLOG_PATH;
+    FILE* vlog = fopen(vlog_path.c_str(), "rb");
+    fseek(vlog, 0, SEEK_END);
+    size_t file_size = ftell(vlog);
+    total_num -= file_size / (KEY_SIZE + VALUE_SIZE);
+    fclose(vlog);
+    int res = std::remove(vlog_path.c_str());
+
+    vlog_path = LI_VLOG_PATH;
+    vlog = fopen(vlog_path.c_str(), "rb");
+    if(vlog!=NULL){
+      fseek(vlog, 0, SEEK_END);
+      file_size = ftell(vlog);
+      total_num -= file_size / (KEY_SIZE + VALUE_SIZE);
+      fclose(vlog);
+    }
+
+
+
+    if (db != nullptr) {
+        // delete db;
+        db = new_db;  // Switch to the new DB
+        new_db = nullptr;
+        
+        // // Clean up old DB files
+        // rocksdb::Options options;
+        // rocksdb::Status status = rocksdb::DestroyDB("./db/db", options);
+        // if (!status.ok()) {
+        //     std::cerr << "Failed to erase old database: " << status.ToString() << std::endl;
+        // }
+        
+        // Rename new DB directory to replace old one
+        rename("./db/db_new", "./db/db");
+    }
+
+    string old_vlog = LI_VLOG_PATH;
+    string new_vlog = NEW_LI_VLOG_PATH;
+    
+    if (rename(new_vlog.c_str(), old_vlog.c_str()) != 0) {
+        cerr << "Error renaming new vlog file" << endl;
+    }
+
+    old_vlog = VLOG_PATH;
+    new_vlog = NEW_VLOG_PATH;
+    if (rename(new_vlog.c_str(), old_vlog.c_str()) != 0) {
+        cerr << "Error renaming new vlog file" << endl;
+    }
+
+    string model_s = model_str;
+    res = std::remove(model_s.c_str());
+    if (rename(new_model_str.c_str(), model_str.c_str()) != 0) {
+        cerr << "Error renaming new model file" << endl;
+    }
+
+    res = std::remove(key_array_str.c_str());
+    if (rename(new_key_array_str.c_str(), key_array_str.c_str()) != 0) {
+        cerr << "Error renaming new model file" << endl;
+    }
+
+    gc_in_progress = false;
   }
 
 };

@@ -11,13 +11,8 @@
 #include <stdlib.h>     // srand(), rand()
 #include <functional>
 #include <sys/time.h>  // for gettimeofday()
-//#include "group.h"
 #include "learnedKV.h"
-// #include "RDB.h"
-// #include "BlobDB.h"
-//#include "HashKV.h"
 // #include "learnedKV_leveldb_new.h"
-// #include "B+_Tree_copy.h"
 
 using namespace std;
 
@@ -204,14 +199,6 @@ int main(int argc, char **argv) {
     double over_provision_ratio = stod(get_with_default(flags, "over_provision_ratio", "0.3"));
     string distribution = get_with_default(flags, "distribution", "zipfian");
 
-    // if(learned_index_used){
-    //     cout<<"Learned index is used"<<endl;
-    // }
-    // else{
-    //     cout<<"Learned index is not used"<<endl;
-    // }
-    
-    //cout<<"GROUP_SIZE (MB): "<<1.0*GROUP_SIZE/(1024*1024)<<endl;
     if(index_type=="LearnedKV"){
         cout<<"Using LearnedKV"<<endl;
         learned_index_used = true;
@@ -235,16 +222,9 @@ int main(int argc, char **argv) {
     read_workload(workloads, keys_file_path);
     assert(KVNUM<=workloads.size());
 
-    
-
-    //Group* groups = new Group[numOfGroup];
     LearnedKV *learnedkv = new LearnedKV;
-    //RDB *learnedkv = new RDB;
-    //BlobDB *learnedkv = new BlobDB;
-    //HashKV *learnedkv = new HashKV;
 
 
-    
     long read_count = 0;
     long write_count = 0;
 
@@ -337,62 +317,26 @@ int main(int argc, char **argv) {
         int groupId = 0;
 
         
-        // //COMMENTED FOR SINGLE GROUP TEST
-        // if (hash_based){
-        //     size_t tmp = hash_ull(key);
-        //     groupId = tmp%(numOfGroup); // can be replaced by simple hash function
-        // }
-        // else{
-        //     groupId = (key-min)/keyRangePerGroup;
-        //     if(groupId>=numOfGroup){groupId=numOfGroup-1;}
-        // }
-        
-
-        // TODO: build a tree index to decide the correct group for each key
 
         // determine read or write
         string op = workloads[i].first;
         //cout<<"op: "<<op<<endl;
         if(op=="UPDATE" || op=="INSERT"){
-            // insert each key to its group
-            // char key_char[KEY_SIZE+1]; // excluding the null terminator
-            // char value[VALUE_SIZE+1];
-            // memset(key_char, 0, sizeof(key_char));
-            // memset(value, 0, sizeof(value));
-            
-            // memcpy(key_char, &key, sizeof(unsigned long long));
 
             string value;
             
             gen_value(key,value,VALUE_SIZE);
-            // if(key==14643238588227784960ULL){
-            //     cout<<"key: "<<key<<endl;
-            //     cout<<"value to be put: "<<value<<endl;
-            // }
             
             struct timeval startTime, endTime;
             gettimeofday(&startTime, 0);
             learnedkv->put(key, KEY_SIZE, value, VALUE_SIZE);
-            //groups[groupId].put(key_char, KEY_SIZE, value, VALUE_SIZE);
-            //groups[groupId].get(key_char, KEY_SIZE, value, VALUE_SIZE);
             gettimeofday(&endTime, 0);
             time_map[op] += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
             write_count++;
         }
         else if(op=="READ"){
-            // char key_char[KEY_SIZE+1]; // excluding the null terminator
-            // char value[VALUE_SIZE+1];
-            // memset(key_char, 0, sizeof(key_char));
-            // memset(value, 0, sizeof(value));
-
-            // //ull_to_char(key_char, key, KEY_SIZE);
-            // //char key_data[sizeof(unsigned long long)];
-            // memcpy(key_char, &key, sizeof(unsigned long long));
 
             string value;
-
-            //gen_value(key_char,value,VALUE_SIZE);
-            //groups[groupId].put(key_char, KEY_SIZE, value, VALUE_SIZE);
             struct timeval startTime, endTime;
             gettimeofday(&startTime, 0);
             int res = learnedkv->get(key, KEY_SIZE, value, VALUE_SIZE);
@@ -400,15 +344,8 @@ int main(int argc, char **argv) {
             gettimeofday(&endTime, 0);
             time_map[op] += (endTime.tv_sec - startTime.tv_sec) * 1000000 + (endTime.tv_usec - startTime.tv_usec);
             read_count++;
-
-
-            // if(key==14643238588227784960ULL){
-            //     cout<<"key: "<<key<<endl;
-            //     cout<<"value out of get(): "<<value<<endl;
-            // }
             
             // string correct_value;
-            
             // gen_value(key,correct_value,VALUE_SIZE);
             // if(value.compare(correct_value)!=0){
             //     cout<<"Read value is not correct"<<endl;
@@ -419,12 +356,6 @@ int main(int argc, char **argv) {
             // }
         }
         else if(op=="SCAN"){
-            // char key_char[KEY_SIZE+1]; // excluding the null terminator
-            // char value[VALUE_SIZE+1];
-            // memset(key_char, 0, sizeof(key_char));
-            // memset(value, 0, sizeof(value));
-
-            // memcpy(key_char, &key, sizeof(unsigned long long));
 
             struct timeval startTime, endTime;
             gettimeofday(&startTime, 0);
@@ -460,17 +391,6 @@ int main(int argc, char **argv) {
 
     // learnedkv->destroy_rocksdb();
 
-    // // only for collecting statistics
-    // if (bytes_written > 0) {
-    //     double write_amp = static_cast<double>(bytes_written + bytes_written_compaction) / bytes_written;
-    //     std::cout<<"Bytes written: "<<bytes_written<<std::endl;
-    //     std::cout<<"Bytes written to learned index: "<<bytes_written_learned_index<<std::endl;
-    //     std::cout<<"Bytes written compaction: "<<bytes_written_compaction<<std::endl;
-    //     std::cout << "Write Amplification: " << write_amp << std::endl;
-    // }
-    // else{
-    //     std::cout << "No write operation" << std::endl;
-    // }
 
     return 0;
 }
